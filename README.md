@@ -20,6 +20,8 @@
 
 - **零依赖**: 纯 TypeScript 默认导出, 无需 `@opencode/plugin` 别名, 拷进插件目录即用
 - **延迟回核**: 权限请求先等 N 秒回核 `permission.list`, 已被 autoaccept 瞬批的不打扰
+- **重试风暴免疫**: agent 重试 ask 会换新 requestID, 同会话/同动作/同资源复用同一编号且只推一张卡(点旧卡按钮批准的是最新请求)
+- **动作静音**: `permissionSilence` 里列出的动作完全不推送(如 `external_directory`)
 - **卡片审批**: QQ 客户端点按钮 → `INTERACTION_CREATE` 回调 → 自动 `PUT /interactions/{id}` 响应 → 进程内执行审批, 全程无需开 TUI
 - **文字指令兜底**: 私聊回复 `#1042 批准` 亦等效
 - 单例去重 + 位置归属, 多实例/热重载不会重复推送
@@ -130,6 +132,7 @@ openid 是「机器人 × 用户」一对一的 id, 必须先有交互记录才�
   "minDuration": 0,          // 秒; 会话从 busy 到 idle 短于此则不发 complete
   "idleDelayMs": 300,        // complete 抖动合流时长; 短命 run 进程建议 ≤300
   "permissionWaitMs": 5000,  // 权限通知延迟回核毫秒; 仍 pending(autoaccept 没接住)才推卡片
+  "permissionSilence": [],   // 这些动作完全不推送, 例: ["external_directory"]
   "cardInbound": true,       // false → 不开 WS 网关(收不到按钮/文字审批)
   "cardFallback": true,      // 卡片被拒(资质/额度)时降级纯文本
   "onlyProjects": [],        // 目录前缀过滤, 空=全部项目

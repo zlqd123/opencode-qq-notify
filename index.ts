@@ -29,8 +29,10 @@ type QQConfig = {
   events?: { complete?: boolean; error?: boolean; permission?: boolean; question?: boolean }
   /** 秒; 会话从 busy 到 idle 短于此则不发 complete */
   minDuration?: number
-  /** 审批通知延迟毫秒: 到点回核仍 pending(activeaccept 没接住)才推 */
+  /** 审批通知延迟毫秒: 到点回核仍 pending(autoaccept 没接住)才推 */
   permissionWaitMs?: number
+  /** 这些动作不推送(例: ["external_directory"]); 留空 = 全部推送 */
+  permissionSilence?: string[]
   /** 仅通知目录包含这些前缀的会话; 空 = 全部 */
   onlyProjects?: string[]
   /** HTTP 代理 http://host:port (Bun fetch 生效); 留空走环境变量 */
@@ -264,15 +266,38 @@ async function sendPermissionCard(
 // ==================== 待批登记簿 ====================
 const pendingPerms = new Map<
   string,
-  { sessionID: string; requestID: string; action: string; resources: string[]; at: number }
+  { sessionID: string; requestID: string; action: string; resources: string[]; at: number; cardSent?: number; resKey: string }
 >()
+const resIndex = new Map<string, string>() // 同会话同动作同资源 → 短编号(吸收 ask 重试风暴)
 let shortSeq = 1000
-function registerPending(sessionID: string, requestID: string, action: string, resources: string[]): string {
-  for (const [sid, v] of pendingPerms) if (Date.now() - v.at > PENDING_PERM_TTL_MS) pendingPerms.delete(sid)
-  for (const [sid, v] of pendingPerms) if (v.requestID === requestID) return sid // 已登记
+const normRes = (arr: string[]) => arr.map((r) => r.replace(/\\/g, "/").toLowerCase()).join(" ")
+function registerPending(
+  sessionID: string,
+  requestID: string,
+  action: string,
+  resources: string[],
+): { shortId: string; dup: boolean } {
+  for (const [sid, v] of pendingPerms)
+    if (Date.now() - v.at > PENDING_PERM_TTL_MS) {
+      resIndex.delete(v.resKey)
+      pendingPerms.delete(sid)
+    }
+  for (const [sid, v] of pendingPerms) if (v.requestID === requestID) return { shortId: sid, dup: true } // 已登记
+  // 同一会话 retry 循环会换新 requestID 重问同一资源: 复用编号并把映射指向最新请求, 旧卡按钮仍然有效
+  const resKey = `${sessionID}|${action}|${normRes(resources)}`
+  const known = resIndex.get(resKey)
+  if (known && pendingPerms.has(known)) {
+    const entry = pendingPerms.get(known)!
+    entry.requestID = requestID
+    entry.action = action
+    entry.resources = resources
+    entry.at = Date.now()
+    return { shortId: known, dup: true }
+  }
   const shortId = String(++shortSeq)
-  pendingPerms.set(shortId, { sessionID, requestID, action, resources, at: Date.now() })
-  return shortId
+  pendingPerms.set(shortId, { sessionID, requestID, action, resources, at: Date.now(), resKey })
+  resIndex.set(resKey, shortId)
+  return { shortId, dup: false }
 }
 function findByData(data: string): { shortId: string; want: string } | undefined {
   const m = /^(permapp|permalways|permrej|permnoop)_(\d+)$/.exec(data ?? "")
@@ -600,7 +625,12 @@ export default {
                 if (!requestID || permTimers.has(requestID)) break
                 const action = p.action ?? p.permission ?? "-"
                 const resources: string[] = p.resources ?? p.patterns ?? []
-                const shortId = registerPending(p.sessionID, requestID, String(action), resources.map(String))
+                if (opts.permissionSilence?.includes(String(action))) {
+                  if (opts.debug) log("动作在静音列表, 忽略 ask", action)
+                  break
+                }
+                const reg = registerPending(p.sessionID, requestID, String(action), resources.map(String))
+                const shortId = reg.shortId
                 const info = await infoOf(p.sessionID)
                 if (gated(info)) break
                 invalidateIdle(p.sessionID)
@@ -628,8 +658,18 @@ export default {
                       return
                     }
                     void (async () => {
+                      // 同资源 retry 重问: 编号复用且旧卡已发, 不再重推
+                      const entry = pendingPerms.get(shortId)
+                      if (reg.dup && entry?.cardSent) {
+                        if (opts.debug) log("同资源重复 ask, 沿用卡片 #", shortId, "→", requestID)
+                        return
+                      }
                       const ok = await sendPermissionCard(opts, shortId, info, String(action), resources)
-                      if (ok && opts.debug) log("审批卡已发 #", shortId)
+                      if (ok) {
+                        const en = pendingPerms.get(shortId)
+                        if (en) en.cardSent = Date.now()
+                        if (opts.debug) log("审批卡已发 #", shortId)
+                      }
                     })()
                   })()
                 }, permissionWaitMs(opts))
@@ -708,6 +748,7 @@ async function executeApproval(cfg: QQConfig, shortId: string, want: string) {
   try {
     await pluginCtx.permission.reply({ sessionID: entry.sessionID, requestID: entry.requestID, reply })
     pendingPerms.delete(shortId)
+    if (entry.resKey) resIndex.delete(entry.resKey)
     void sendText(
       cfg,
       `${reply === "reject" ? "🚫 已拒绝" : reply === "always" ? "✅ 已批准(始终允许)" : "✅ 已批准(仅本次)"} #${shortId} · ${entry.action}`,
@@ -873,3 +914,4 @@ function parseTextCommand(text: string): { shortId: string; want: string } | und
     verb.includes("拒") || verb === "reject" ? "permrej" : verb.includes("忽") || verb === "noop" ? "permnoop" : verb === "always" ? "permalways" : "permapp"
   return { shortId, want }
 }
+
