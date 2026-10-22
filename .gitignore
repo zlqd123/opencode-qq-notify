@@ -1,0 +1,12 @@
+# 内含 AppSecret / openid, 绝不入库
+qq-notify.jsonc
+qq-notify.json
+*.jsonc
+
+# 本机日志(含事件标题等隐私)
+*.log
+
+# 通用
+node_modules/
+.DS_Store
+Thumbs.db
