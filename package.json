@@ -18,6 +18,8 @@
     "probe-openid.mjs",
     "README.md"
   ],
+  "main": "index.ts",
+  "publishConfig": { "access": "public" },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zlqd123/opencode-qq-notify.git"
