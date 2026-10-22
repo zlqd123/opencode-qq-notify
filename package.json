@@ -1,5 +1,5 @@
 {
-  "name": "opencode-qq-notify",
+  "name": "@zlqd123/opencode-qq-notify",
   "version": "0.1.0",
   "description": "OpenCode notifications to QQ official bot (C2C DM) with interactive card-based permission approval",
   "type": "module",
@@ -23,5 +23,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zlqd123/opencode-qq-notify.git"
-  }
+  },
+  "bugs": "https://github.com/zlqd123/opencode-qq-notify/issues",
+  "homepage": "https://github.com/zlqd123/opencode-qq-notify#readme"
 }

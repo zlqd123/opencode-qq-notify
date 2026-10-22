@@ -1,0 +1,95 @@
+name: Publish
+
+# Triggered by a GitHub Release being published (tag v* → package.json version must match).
+#
+# Dual target:
+#   1. npmjs.com  — Trusted Publishing (OIDC). No stored npm token, no OTP.
+#      One-time registration (browser passkey): npmjs.com package page →
+#      Settings → Trusted Publisher → owner zlqd123 / repo opencode-qq-notify / publish.yml
+#   2. GitHub Packages — registry npm.pkg.github.com, auth via GITHUB_TOKEN.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  id-token: write # OIDC for npm Trusted Publishing
+  contents: read
+  packages: write # GitHub Packages
+
+jobs:
+  publish-npmjs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # npm >= 11.5 is required for the OIDC publish path (Node 22 bundles npm 10.x).
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      # Fail before publishing if the release tag and package.json disagree.
+      - name: Verify version matches release tag
+        if: github.event_name == 'release'
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json ($PKG_VERSION) != release tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+      # No NODE_AUTH_TOKEN here: setting it makes npm skip OIDC detection.
+      - name: Publish to npmjs.com
+        run: |
+          npm config delete //registry.npmjs.org/:_authToken || true
+          npm publish --no-workspaces
+
+      # Smoke-workflow note: node type-stripped source can't run on Node 22 without flags;
+      # consumers run it through OpenCode's Bun runtime, so a publish-side import test is skipped.
+      - name: Verify publish landed
+        run: |
+          VERSION_TO_CHECK="${GITHUB_REF_NAME#v}"
+          if [ "$VERSION_TO_CHECK" = "main" ]; then VERSION_TO_CHECK=$(node -p "require('./package.json').version"); fi
+          for i in $(seq 1 20); do
+            if npm view "@zlqd123/opencode-qq-notify@$VERSION_TO_CHECK" version --registry https://registry.npmjs.org 2>/dev/null; then
+              echo "PUBLISH OK"
+              exit 0
+            fi
+            echo "not visible yet (attempt $i/20), retrying in 15s..."
+            sleep 15
+          done
+          echo "::error::publish did not land"
+          exit 1
+
+  publish-gpr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+
+      - name: Verify version matches release tag
+        if: github.event_name == 'release'
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json ($PKG_VERSION) != release tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+      - name: Publish to GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm publish --no-workspaces --registry https://npm.pkg.github.com || \
+          { echo "::warning::already published (registry may reject re-publish of same version)"; }

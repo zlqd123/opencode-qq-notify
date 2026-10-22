@@ -42,6 +42,22 @@ cp index.ts ~/.config/opencode/plugins/qq-notify/
 
 获取 openid: 在本仓库/插件目录跑 `node probe-openid.mjs` 挂着, 用 QQ 给机器人发一条私聊消息, 打印出的 `user_openid` 即是; 再用 `node send-test.mjs` 验证链路。
 
+## 从包管理器安装(可选)
+
+发布通道: GitHub Release → 双注册表发布 (npmjs.com 走 OIDC 信任发布, 参照 [dsh-composer-keys](https://github.com/zlqd123/dsh-composer-keys) 的发布工作流; GitHub Packages 走 GITHUB_TOKEN)。
+
+```sh
+# npmjs.com(推荐, 免任何 token 配置)
+opencode plugin add @zlqd123/opencode-qq-notify
+
+# 直接从 GitHub 安装(不走 npm)
+opencode plugin add github:zlqd123/opencode-qq-notify
+
+# GitHub Packages: 消费者需先给 @zlqd123 scope 配 token
+# echo "//npm.pkg.github.com/:_authToken=<GH PAT packages:read>" >> ~/.npmrc
+# npm config set @zlqd123:registry https://npm.pkg.github.com
+```
+
 ## 适配的运行时事实(v2.0.22-zhcn.1 实测)
 
 - 事件流载体是 `event.data`(**不是** SDK 类型文档写的 `event.properties`)
